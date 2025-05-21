@@ -27,3 +27,4 @@ threading.Thread(target=relay, daemon=True).start()
 while True:
     msg = input()
     conn.send(msg.encode())
+

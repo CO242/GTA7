@@ -73,3 +73,4 @@ def receive_data():
 threading.Thread(target=receive_data, daemon=True).start()
 
 app.run()
+

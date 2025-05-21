@@ -1,92 +1,75 @@
-import pygame
-import random
-import sys
+from ursina import *
+import socket
+import threading
 
-# Initialize Pygame
-pygame.init()
+app = Ursina()
 
-# Constants
-SCREEN_WIDTH = 400
-SCREEN_HEIGHT = 300
-FPS = 60
-REEL_WIDTH = 80
-REEL_HEIGHT = 80
-REEL_COUNT = 3
-SYMBOL_SIZE = 64
-SYMBOLS = ['🍒', '🔔', '🍋', '💎', '7️⃣']  # Just for reference, we’ll use colored squares
+# Networking
+HOST = input("Enter server IP (or 127.0.0.1 for localhost): ")
+PORT = 5050
 
-# Colors (represent symbols)
-SYMBOL_COLORS = {
-    '🍒': (255, 0, 0),      # Red
-    '🔔': (255, 255, 0),    # Yellow
-    '🍋': (255, 255, 100),  # Light Yellow
-    '💎': (0, 255, 255),    # Cyan
-    '7️⃣': (255, 0, 255)    # Magenta
-}
+client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client.connect((HOST, PORT))
 
-# Screen setup
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("Pixel Slot Machine")
-clock = pygame.time.Clock()
+# Players
+player = Entity(model='cube', color=color.orange, scale=(1,2,1), position=(0,1,0), collider='box')
+remote_player = Entity(model='cube', color=color.azure, scale=(1,2,1), position=(2,1,0), collider='box')
 
-# Reel class
-class Reel:
-    def __init__(self, x):
-        self.x = x
-        self.symbols = [random.choice(SYMBOLS) for _ in range(5)]
-        self.offset = 0
-        self.speed = 0
-        self.spinning = False
+ground = Entity(model='plane', scale=50, color=color.green, collider='box', texture='white_cube', texture_scale=(50, 50))
+platforms = []
 
-    def start_spin(self):
-        self.speed = random.randint(20, 30)
-        self.spinning = True
+# Parkour platforms
+for i in range(10):
+    platform = Entity(model='cube', color=color.gray, scale=(3, 0.5, 3), position=(i*5, 2+(i%3), 0), collider='box')
+    platforms.append(platform)
 
-    def update(self):
-        if self.spinning:
-            self.offset += self.speed
-            self.speed *= 0.95  # slow down gradually
+camera.parent = player
+camera.position = (0, 10, -20)
+camera.rotation_x = 30
 
-            if self.speed < 1:
-                self.spinning = False
-                self.speed = 0
-                self.offset = 0
-                self.symbols = [random.choice(SYMBOLS) for _ in range(5)]
+speed = 5
+jump_height = 8
+velocity_y = 0
+gravity = -20
 
-    def draw(self, surface):
-        base_y = (SCREEN_HEIGHT - SYMBOL_SIZE) // 2
-        for i in range(3):
-            symbol_index = (i + int(self.offset // SYMBOL_SIZE)) % len(self.symbols)
-            symbol = self.symbols[symbol_index]
-            color = SYMBOL_COLORS[symbol]
-            rect = pygame.Rect(self.x, base_y + i * SYMBOL_SIZE - int(self.offset) % SYMBOL_SIZE, REEL_WIDTH, SYMBOL_SIZE)
-            pygame.draw.rect(surface, color, rect)
-            pygame.draw.rect(surface, (0, 0, 0), rect, 2)  # border
+def update():
+    global velocity_y
+    move = Vec3(
+        held_keys['d'] - held_keys['a'],
+        0,
+        held_keys['w'] - held_keys['s']
+    ).normalized() * time.dt * speed
 
-# Initialize reels
-reels = [Reel(50 + i * (REEL_WIDTH + 10)) for i in range(REEL_COUNT)]
+    player.position += player.forward * move.z + player.right * move.x
 
-# Main loop
-running = True
-while running:
-    screen.fill((30, 30, 30))
+    # Gravity
+    velocity_y += gravity * time.dt
+    player.y += velocity_y * time.dt
 
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
+    # Ground collision
+    hit_info = player.intersects()
+    if hit_info.hit:
+        player.y += 0.01
+        velocity_y = 0
+        if held_keys['space']:
+            velocity_y = jump_height
 
-        # Start spinning on spacebar
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-            for reel in reels:
-                reel.start_spin()
+    # Send position to other player
+    send_data = f"{player.x:.2f},{player.y:.2f},{player.z:.2f}"
+    try:
+        client.send(send_data.encode())
+    except:
+        pass
 
-    # Update and draw reels
-    for reel in reels:
-        reel.update()
-        reel.draw(screen)
+def receive_data():
+    while True:
+        try:
+            data = client.recv(1024).decode()
+            x, y, z = map(float, data.split(','))
+            remote_player.position = (x, y, z)
+        except:
+            break
 
-    pygame.display.flip()
-    clock.tick(FPS)
+threading.Thread(target=receive_data, daemon=True).start()
 
-pygame.quit()
-sys.exit()
+app.run()
